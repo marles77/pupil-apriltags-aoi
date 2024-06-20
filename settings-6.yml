@@ -18,10 +18,10 @@ COORD:
     1.5: [0,3]
 
 # files
-PATH_VID: video/
+PATH_VID: C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/ #video/ # 0 for webcam
 FILE: world.mp4
 PATH_GAZE: gaze/
 FILE_GAZE: gaze_positions.csv
 TABLE_GAZE: gaze_table
 FRAME_START: 0
-FRAME_STOP: null
+FRAME_STOP: 100 #null
