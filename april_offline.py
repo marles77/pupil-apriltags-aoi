@@ -1,10 +1,13 @@
 # ======================================================================= #
 # analyze gaze data from Pupil Core eye tracker using apriltag detection  #
 #                                                                         #
+# use: python april_offline.py --set settings-6.yml --run [0, 1, 2, 3]    #
+#      0: run analysis; 1: run aoi view; 2: run tags view; 3: run test    #
 # ========================================================================#
 
 import yaml
 import sys
+import os
 from collections import defaultdict
 from pupil_apriltags import Detector
 import cv2
@@ -72,9 +75,12 @@ class AppSettings:
     X_CORRECT: float = field(default=0)
     Y_CORRECT: float = field(default=0.25)
     COORD: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
+    ALPHA: float = field(default=0.5)
+
+    AOIS: List[Dict] = field(default_factory=list)
 
     # paths to video files and gaze data files
-    PATH_VID: str = field(default='')
+    PATH_VID: Any = field(default='')
     FILE: str = field(default='')
     VID: Any = field(default='')
     PATH_GAZE: str = field(default='')
@@ -107,15 +113,22 @@ class Settings(AppSettings, metaclass=SingletonMeta):
     
 
     def update_dirs(self):
-        if self.FILE:
-            self.VID = self.PATH_VID + self.FILE
-        else:
-            print(f"{Cols.CRED}Brak pliku video: *{self.FILE}* {Cols.CEND}")
-            sys.exit()
+        '''
+        Update video and gaze file paths
+        '''
+        if self.PATH_VID == 0:
+            self.VID = 0
+        else:   
+            if self.FILE:
+                self.VID = self.PATH_VID + self.FILE
+            else:
+                print(f"{Cols.CRED}No video file path: *{self.FILE}* {Cols.CEND}")
+                sys.exit()
+        
         if self.FILE_GAZE:
             self.GAZE = self.PATH_GAZE + self.FILE_GAZE
         else:
-            print(f"{Cols.CRED}Brak pliku gaze{Cols.CEND}")
+            print(f"{Cols.CRED}No gaze file path{Cols.CEND}")
             sys.exit()
         
 
@@ -134,14 +147,22 @@ class Aoi:
     '''
     Area of interest class
     '''
-    name: str
     settings: AppSettings
+    name: str
+    tag_upleft: Optional[Dict[int, Tuple[float, float]]|None] = None
+    tag_upright: Optional[Dict[int, Tuple[float, float]]|None] = None
+    tag_botleft: Optional[Dict[int, Tuple[float, float]]|None] = None
+    tag_botright: Optional[Dict[int, Tuple[float, float]]|None] = None
+    horiz: Optional[Tuple[float, float]|None] = None
+    vert: Optional[Tuple[float, float]|None] = None
+
     tag_ids: Optional[List[int]|None] = None
     #pts: Optional[List[List[float]]]
     vertices = Optional[List[List[float|int]]|None]
     gaze_sum: int = 0
 
-    def update(self, tags_selected: Dict, point: Tuple[int, int]) -> None:
+
+    def update(self, tags_selected: Dict, point: Tuple[int, int], draw: bool=False, frame: Optional[np.ndarray|None]=None) -> None:
         '''
         Update AOI with new tag detections
         '''
@@ -153,6 +174,10 @@ class Aoi:
                 pts.remove([None, None])
         
             self.vertices = self._sort_vertices(pts)
+
+            if draw and frame is not None:
+                self._draw_aoi(frame=frame)
+            
             if Gaze.is_point_in_quadrilateral(point[0], point[1], self.vertices):
                 self.gaze_sum += 1
                 #print(f"{CRED}Left AOI{CEND}")
@@ -212,6 +237,7 @@ class Aoi:
             # exit()
         return vertices
     
+    # TODO: zmienic uwzględniając nowe ustawienia
     def _establish_pts(self, tags: Dict, ids: Tuple) -> List[List[float]]:
         '''
         Establishes the vertices of the quadrilateral (aoi)
@@ -256,7 +282,7 @@ class Aoi:
         """
         return [Gaze.transform_point_to_opencv(vertex, frame_width, frame_height) for vertex in vertices]
     
-    def draw_aoi(self, frame, frame_width, frame_height, tags, ids):
+    def _draw_aoi(self, frame):
         '''
         Draws the quadrilateral (aoi)
         parameters:
@@ -386,9 +412,22 @@ class Runner:
 
         self.vid = settings.VID 
         self.tag_ids = settings.TAGS['IDS']
+        self.aois = []#settings.AOIS
         self.gaze = Gaze(path=settings.GAZE)
-        self.left_aoi = Aoi(name="left", settings=settings, tag_ids=self.tag_ids[:4])
-        self.right_aoi = Aoi(name="right", settings=settings, tag_ids=self.tag_ids[2:6])
+        # self.left_aoi = Aoi(name="left", settings=settings, tag_ids=self.tag_ids[:4])
+        # self.right_aoi = Aoi(name="right", settings=settings, tag_ids=self.tag_ids[2:6])
+        for aoi in settings.AOIS:
+            aoi_tag_ids = [val['id'] for key, val in aoi.items() if key in ('tag_upleft', 'tag_upright', 'tag_botleft', 'tag_botright')]
+            self.aois.append(Aoi(name=aoi['name'], 
+                                 tag_upleft=aoi['tag_upleft'],
+                                 tag_upright=aoi['tag_upright'],
+                                 tag_botleft=aoi['tag_botleft'],
+                                 tag_botright=aoi['tag_botright'],
+                                 horiz=aoi['horiz'],
+                                 vert=aoi['vert'],
+                                 settings=settings, 
+                                 tag_ids=aoi_tag_ids))
+            
         self.white_space_aoi = Aoi(name="white-space", settings=settings)
         
 
@@ -470,14 +509,129 @@ class Runner:
         '''
         View the detected AOIs in the video
         '''
-        print("I am running the view aoi")
+        print("I am running AOI detection")
+
+        num_gaze_left = 0
+        num_gaze_right = 0
+        
+        # if self.vid:
+
+        cap = cv2.VideoCapture(self.vid)
+
+        if not cap.isOpened():
+            print(f"{Cols.CRED}Error: Could not open video.{Cols.CEND}")
+            exit()
+        else:
+            frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.vid else 0
+            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | START STREAMING - Press Q to exit{Cols.CEND}")
+
+        num_frame = 0
+
+        while cap.isOpened():
+            # if self.vid:
+            
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Convert the frame to grayscale as the detector requires a single channel image
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Detect AprilTags in the grayscale image
+            tags = self.detector.detect(gray)
+
+            # Draw bounding boxes around detected AprilTags
+            tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids} if self.vid else {tag.tag_id: tag for tag in tags}
+
+            # if len(tags_0_3) == 4:
+            #     pprint(tags_0_3.keys())
+            #     break
+
+        
+            for _, tag in tags_selected.items():
+                if self.vid:
+                    corner = self.settings.TAGS['CORNERS'][tag.tag_id]
+                    if corner in (0, 1, 2, 3):
+                        pt = tuple(tag.corners[self.settings.TAGS['CORNERS'][tag.tag_id]].astype(int))
+                    else:
+                        pt = (tag.center[0].astype(int), tag.corners[self.settings.COORD[corner][0]][1].astype(int))
+                    
+                    cv2.circle(frame, pt, 5, (255, 255, 0), -1)
+
+                    for idx in range(len(tag.corners)):
+                        
+                        pt1 = tuple(tag.corners[idx].astype(int))
+                        pt2 = tuple(tag.corners[(idx + 1) % len(tag.corners)].astype(int))
+                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
+
+                # Optionally, draw the tag ID
+                tag_id = str(tag.tag_id)
+                cv2.putText(frame, tag_id, (tag.center[0].astype(int), tag.center[1].astype(int)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+            # *****
+            try:
+                gaze_point = tuple(self.gaze.compr_data[num_frame, [3, 4]])
+                point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
+                left, right = 0, 0
+                # Select AprilTags
+                tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids}
+                #print("Tags IDs:", tags_selected.keys() )
+                left = self.left_aoi.update(tags_selected, point, draw=True, frame=frame)
+                right = self.right_aoi.update(tags_selected, point, draw=True, frame=frame)
+                if left:
+                    aoi_name = 'left'
+                elif right:
+                    aoi_name = 'right'
+                else:
+                    aoi_name = 'white-space'
+                    self.white_space_aoi.gaze_sum += 1
+                
+                
+
+            except Exception as e:
+                # logging.error(f"Error processing frame {num_frame}: {e}")
+                # print(f"Error processing frame {frame}: {e}")
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
+                exit()
+            
+
+            # *****
+            if self.vid:
+                overlay = frame.copy()
+                cv2.circle(overlay, point, 15, (0, 0, 255), -1)
+
+            blended_image = cv2.addWeighted(overlay, self.settings.ALPHA, frame, 1-self.settings.ALPHA, 0) if self.vid else frame
+            # Display the frame with detected tags
+            cv2.imshow('Pupil Labs AprilTag Detection', blended_image)
+
+
+            # Press 'q' to exit the video display loop
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+            
+            num_frame += 1
+            # if num_frame >= 10:
+            #     break
+        # Release resources
+        print(f"Frames read: {num_frame}")
+        print(f"{Cols.CGREEN}Left: {num_gaze_left} | Right: {num_gaze_right}{Cols.CEND}")
+        cap.release()
+        cv2.destroyAllWindows()
+
+
 
 
     def run_view_tags(self) -> None:
         '''
         View the detected tags in the video
         '''
-        print("I am running the view tags")
+        print("I am running tags detection")
 
         cap = cv2.VideoCapture(self.vid)
 
@@ -498,6 +652,7 @@ class Runner:
             if not ret:
                 break
 
+            
             # Convert the frame to grayscale as the detector requires a single channel image
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -507,12 +662,13 @@ class Runner:
             # Draw bounding boxes around detected AprilTags
             tags_selected = {tag.tag_id: tag for tag in tags}
 
-            # if len(tags_0_3) == 4:
-            #     pprint(tags_0_3.keys())
-            #     break
-
-        
+            
             for _, tag in tags_selected.items():
+                for idx in range(len(tag.corners)):
+                    
+                    pt1 = tuple(tag.corners[idx].astype(int))
+                    pt2 = tuple(tag.corners[(idx + 1) % len(tag.corners)].astype(int))
+                    cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
                 # Optionally, draw the tag ID
                 tag_id = str(tag.tag_id)
                 cv2.putText(frame, tag_id, (tag.center[0].astype(int), tag.center[1].astype(int)),
@@ -526,13 +682,113 @@ class Runner:
                 break
             
             num_frame += 1
-            if num_frame >= 1200:
-                break
+            # if num_frame >= 1200:
+            #     break
         # Release resources
+        print(f"Frames read: {num_frame}")
         cap.release()
         cv2.destroyAllWindows()
             
 
+    def run_test(self) -> None:
+        '''
+        Test AOIS
+        '''
+        print("I am running AOIS test")
+        
+        for aoi in self.aois:
+            pprint(aoi.__dict__, sort_dicts=False)
+
+        sys.exit()
+
+        cap = cv2.VideoCapture(self.vid)
+
+        if not cap.isOpened():
+            print(f"{Cols.CRED}Error: Could not open video.{Cols.CEND}")
+            exit()
+        else:
+            frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.vid else 0
+            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | START STREAMING - Press Q to exit{Cols.CEND}")
+
+        num_frame = 0
+
+        while cap.isOpened():
+            # if self.vid:
+            
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Convert the frame to grayscale as the detector requires a single channel image
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Detect AprilTags in the grayscale image
+            tags = self.detector.detect(gray)
+
+            # Draw bounding boxes around detected AprilTags
+            # ********* TODO: dokonczyc wyswietlanie AOI na podstawie nowych ustawien
+            #tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids} if self.vid else {tag.tag_id: tag for tag in tags}
+            
+
+
+            try:
+                gaze_point = tuple(self.gaze.compr_data[num_frame, [3, 4]])
+                point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
+                #left, right = 0, 0
+                # Select AprilTags
+                tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids}
+                
+                #print("Tags IDs:", tags_selected.keys() )
+
+                for aoi in self.aois:
+                    aoi.update(tags_selected, point, draw=True, frame=frame)
+
+                # left = self.left_aoi.update(tags_selected, point, draw=True, frame=frame)
+                # right = self.right_aoi.update(tags_selected, point, draw=True, frame=frame)
+                # if left:
+                #     aoi_name = 'left'
+                # elif right:
+                #     aoi_name = 'right'
+                # else:
+                #     aoi_name = 'white-space'
+                #     self.white_space_aoi.gaze_sum += 1
+                
+                
+
+            except Exception as e:
+                # logging.error(f"Error processing frame {num_frame}: {e}")
+                # print(f"Error processing frame {frame}: {e}")
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
+                exit()
+            
+
+            # *****
+            if self.vid:
+                overlay = frame.copy()
+                cv2.circle(overlay, point, 15, (0, 0, 255), -1)
+
+            blended_image = cv2.addWeighted(overlay, self.settings.ALPHA, frame, 1-self.settings.ALPHA, 0) if self.vid else frame
+            # Display the frame with detected tags
+            cv2.imshow('Pupil Labs AOI Test', blended_image)
+
+            #cv2.imshow('Pupil Labs AOI Test', frame)
+
+            # Press 'q' to exit the video display loop
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+            
+            num_frame += 1
+            # if num_frame >= 10:
+            #     break
+        # Release resources
+        print(f"Frames read: {num_frame}")
+        cap.release()
+        cv2.destroyAllWindows()
 
 
 
@@ -557,7 +813,9 @@ def main(argv):
                 debug=0
             )
             runner = Runner(settings, detector=detector)
-            #print(settings.__dict__)
+            #pprint(settings.__dict__)
+            # pprint(runner.aois)
+            # sys.exit()
             if argv[2] == '--run':
                 if argv[3] == '0':
                     runner.run_analysis()
@@ -565,6 +823,8 @@ def main(argv):
                     runner.run_view_aoi()
                 elif argv[3] == '2':
                     runner.run_view_tags()
+                elif argv[3] == '3':
+                    runner.run_test()
                 else:
                     print(f"{Cols.CRED}Error: Invalid argument {argv[3]}{Cols.CEND}")
                     sys.exit()
