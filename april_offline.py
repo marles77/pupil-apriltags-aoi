@@ -72,9 +72,9 @@ class AppSettings:
     # setting3: bool = field(default=True)
     # tags
     TAGS: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
-    X_CORRECT: float = field(default=0)
-    Y_CORRECT: float = field(default=0.25)
-    COORD: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
+    # X_CORRECT: float = field(default=0)
+    # Y_CORRECT: float = field(default=0.25)
+    # COORD: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
     ALPHA: float = field(default=0.5)
 
     AOIS: List[Dict] = field(default_factory=list)
@@ -155,6 +155,7 @@ class Aoi:
     tag_botright: Optional[Dict[int, Tuple[float, float]]|None] = None
     horiz: Optional[Tuple[float, float]|None] = None
     vert: Optional[Tuple[float, float]|None] = None
+    color_bgr: Optional[Tuple[int, int, int]|None] = None
 
     tag_ids: Optional[List[int]|None] = None
     #pts: Optional[List[List[float]]]
@@ -169,13 +170,17 @@ class Aoi:
         if (len( tags_to_aoi := {tag.tag_id: tag for _, tag in tags_selected.items() if tag.tag_id in self.tag_ids} ) in (3, 4)):
             #print(f"AOI: {self.name}; tags: {tags_to_aoi.keys()}")
             pts = self._establish_pts(tags=tags_to_aoi, ids=self.tag_ids)
-            if [None, None] in pts:
-                pts.append(self._find_fourth_vertex(pts))
-                pts.remove([None, None])
+            # if [None, None] in pts:
+            #     pts.append(self._find_fourth_vertex(pts))
+            #     pts.remove([None, None])
         
-            self.vertices = self._sort_vertices(pts)
+            pts_sorted = self._sort_vertices(pts)
+            #print(f"Vertices 1: {pts_sorted}")
+            self.vertices = self._establish_vertices(pts_sorted)
 
             if draw and frame is not None:
+                #print(f"Vertices 2: {self.vertices}")
+                #sys.exit()
                 self._draw_aoi(frame=frame)
             
             if Gaze.is_point_in_quadrilateral(point[0], point[1], self.vertices):
@@ -186,6 +191,7 @@ class Aoi:
                 return 0
                 #print(f"{CYELLOW}No AOI{CEND}")
         return 0
+
 
     def _find_fourth_vertex(self, pts: List[List[float]]) -> Optional[List[float]]:
         '''
@@ -245,30 +251,91 @@ class Aoi:
         tags: dictionary of apriltag ids and their corresponding apriltag objects
         '''
         pts = []
-        tags_sorted = [tags.get(id, None) for id in ids]
+        ids_sorted = [tags.get(id, None) for id in ids]
+        aoi_tags = (self.tag_upleft, self.tag_upright, self.tag_botright, self.tag_botleft)
+        #print(f"AOI tags: {aoi_tags}")
+        #print(f"corner: {tags[ids_sorted[0]['tag_id']].corners[0][0]}")
 
-        try:
-            
-            for tag in tags_sorted:
-                if tag == None:
-                    pt = (None, None)
+        try:   
+            for i, current_tag in enumerate(ids_sorted, start=1):
+                pt = [None, None]
+                if current_tag is None:
+                    pt = [None, None]
+                    print("jest None")
                 else:
-                    size = abs(tag.corners[0][1] - tag.corners[2][1])
-                    corner = self.settings.TAGS['CORNERS'][tag.tag_id]
-                    if corner in (0, 1, 2, 3):
-                        pt = list(tag.corners[self.settings.TAGS['CORNERS'][tag.tag_id]].astype(int))              
-                        pt[1] = pt[1] + int(size * self.settings.Y_CORRECT) if tag.tag_id in (20, 22, 23) else pt[1] - int(size * self.settings.Y_CORRECT)
-                    else:
-                        pt = list((tag.center[0].astype(int), tag.corners[self.settings.COORD[corner][0]][1].astype(int)))
-                        pt[1] = pt[1] + int(size * self.settings.Y_CORRECT) if tag.tag_id in (20, 22, 23) else pt[1] - int(size * self.settings.Y_CORRECT)
+                    try:
+                        tag_width = np.abs(current_tag.corners[0][0] - current_tag.corners[2][0])
+                        #print(f"Width {i}: {tag_width}")
+                    except Exception as e:
+                        logging.error(f"Error getting width: {e}, corner: {type(id.corners)}")
+                    try:
+                        tag_height = abs(current_tag.corners[0][1] - current_tag.corners[2][1])
+                        #print(f"height {i}: {tag_height}")
+                    except Exception as e:
+                        logging.error(f"Error getting height: {e}")
+                    try:
+                        center = [current_tag.center[0], current_tag.center[1]]
+                        #print(f"center {i}: {center}")
+                    except Exception as e:
+                        logging.error(f"Error getting center: {e}")
+                    #pt = [[int(center[0]), int(center[1])] for tag in aoi_tags if id==tag[id]][0]
+                    #pt = [0]
+                    try:
+                        pt = [[int(center[0] + (tag_width/2)*tag['xy'][0]), int(center[1] + (tag_height/2)*tag['xy'][1])] 
+                              for tag in aoi_tags if current_tag.tag_id==tag['id']][0]
+                        #print(f"Punkt {i}: {pt}")
+                        
+                    except Exception as e:
+                        logging.error(f"Error getting point: {e}")
+                    #pt = [[int(center[0]), int(center[1])] for tag in aoi_tags if id==tag[id]][0]
+                    #pt = [0]
 
                 pts.append(pt)
+            
+            if [None, None] in pts:
+                pts.append(self._find_fourth_vertex(pts))
+                pts.remove([None, None])
+               
+            # width_upper = pts[0][0] - pts[1][0] if (pts[0][0] is not None) and (pts[1][0] is not None) else 0
+            # width_lower = pts[2][0] - pts[3][0] if (pts[2][0] is not None) and (pts[3][0] is not None) else 0
+            # height_left = pts[0][1] - pts[3][1] if (pts[0][1] is not None) and (pts[3][1] is not None) else 0
+            # height_right = pts[1][1] - pts[2][1] if (pts[1][1] is not None) and (pts[2][1] is not None) else 0
+
+            # TODO: dokonczyc UWAGA: lepiej ustalić wszystkie wierzchołki na tagach a potem liczyć wymiary aoi
+            # pts[0] = pts[0] if pts[0][0] is not None else [None, None]
+            # width_upper = abs(pts[0][0] - pts[1][0])
+            # width_lower = abs(pts[2][0] - pts[3][0])
+            # height_upper = abs(pts[0][1] - pts[3][1])
+            # height_lower = abs(pts[1][1] - pts[2][1])
+            
+            
+
         except Exception as e:
             logging.error(f"Error establishing pts: {e}")
-            return pts
+            
+            #return pts
             # print(f"Error establishing pts: {e}")
             # exit()
+        #print(f"Vertices 1: {pts}")
         return pts
+    
+
+    def _establish_vertices(self, pts: List[List[float]]) -> List[Tuple[float, float]]:
+        width_upper = abs(pts[0][0] - pts[1][0])
+        width_lower = abs(pts[2][0] - pts[3][0])
+        height_left = abs(pts[0][1] - pts[3][1])
+        height_right = abs(pts[1][1] - pts[2][1])
+
+        #print(f"Width upper: {width_upper}, lower: {width_lower}, height left: {height_left}, height right: {height_right}")
+
+        res_pts = [None, None, None, None]
+
+        res_pts[0] = [int(pts[0][0] + width_upper * self.horiz[0]), int(pts[0][1] + height_left * self.vert[0])]
+        res_pts[1] = [int(pts[1][0] - width_upper * (1-self.horiz[1])), int(pts[1][1] + height_left * (self.vert[0]))]
+        res_pts[2] = [int(pts[2][0] - width_lower * (1-self.horiz[1])), int(pts[2][1] - height_right * (1-self.vert[1]))]
+        res_pts[3] = [int(pts[3][0] + width_lower * self.horiz[0]), int(pts[3][1] - height_right * (1-self.vert[1]))]
+        #print(f"Established Vertices: {res_pts}")
+        return res_pts
     
 
     def _transform_vertices_to_opencv(self, vertices: List[Tuple[float, float]], frame_width: int, frame_height: int) -> List[Tuple[int, int]]:
@@ -299,7 +366,7 @@ class Aoi:
         try:
             pts_poly = np.array(pts, np.int32).reshape((-1, 1, 2))
             isClosed = True
-            color = (255, 50, 50)
+            color = tuple(self.color_bgr) #(255, 50, 50)
             thickness = 2
             cv2.polylines(frame, [pts_poly], isClosed, color, thickness)
             return pts #transform_vertices_to_opencv(pts, frame_width, frame_height)
@@ -425,6 +492,7 @@ class Runner:
                                  tag_botright=aoi['tag_botright'],
                                  horiz=aoi['horiz'],
                                  vert=aoi['vert'],
+                                 color_bgr=aoi['color_bgr'],
                                  settings=settings, 
                                  tag_ids=aoi_tag_ids))
             
@@ -643,8 +711,15 @@ class Runner:
             frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} {Cols.CEND}")
+            if length <= self.settings.FRAME_START:
+                print(f"{Cols.CRED}Error: Video is too short. Check your settings file (FRAME_START is set at {self.settings.FRAME_START}).{Cols.CEND}")
+                exit()
 
-            num_frame = 0
+        start_frame = self.settings.FRAME_START
+        stop_frame = self.settings.FRAME_STOP if self.settings.FRAME_STOP != None else length
+        num_frame = start_frame
+        
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         while cap.isOpened():
             
@@ -664,6 +739,9 @@ class Runner:
 
             
             for _, tag in tags_selected.items():
+                if num_frame == 0:
+                    print(f"Tag identified: {tag.tag_id}")
+                #pprint(tag, sort_dicts=False)
                 for idx in range(len(tag.corners)):
                     
                     pt1 = tuple(tag.corners[idx].astype(int))
@@ -671,7 +749,9 @@ class Runner:
                     cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
                 # Optionally, draw the tag ID
                 tag_id = str(tag.tag_id)
-                cv2.putText(frame, tag_id, (tag.center[0].astype(int), tag.center[1].astype(int)),
+                cv2.rectangle(frame, (tag.center[0].astype(int) - 15, tag.center[1].astype(int) - 15), 
+                              (tag.center[0].astype(int) + 15, tag.center[1].astype(int) + 15), (50, 50, 50), -1)
+                cv2.putText(frame, tag_id, (tag.center[0].astype(int)-10, tag.center[1].astype(int)+5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
             cv2.imshow('Pupil Labs AprilTag Detection', frame)
@@ -682,10 +762,10 @@ class Runner:
                 break
             
             num_frame += 1
-            # if num_frame >= 1200:
-            #     break
+            if num_frame >= stop_frame:
+                break
         # Release resources
-        print(f"Frames read: {num_frame}")
+        print(f"Frames read: {num_frame - start_frame}")
         cap.release()
         cv2.destroyAllWindows()
             
@@ -699,7 +779,7 @@ class Runner:
         for aoi in self.aois:
             pprint(aoi.__dict__, sort_dicts=False)
 
-        sys.exit()
+        #sys.exit()
 
         cap = cv2.VideoCapture(self.vid)
 
@@ -728,35 +808,24 @@ class Runner:
             # Detect AprilTags in the grayscale image
             tags = self.detector.detect(gray)
 
-            # Draw bounding boxes around detected AprilTags
-            # ********* TODO: dokonczyc wyswietlanie AOI na podstawie nowych ustawien
-            #tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids} if self.vid else {tag.tag_id: tag for tag in tags}
-            
-
-
             try:
+                
                 gaze_point = tuple(self.gaze.compr_data[num_frame, [3, 4]])
                 point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
                 #left, right = 0, 0
-                # Select AprilTags
-                tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids}
+                
                 
                 #print("Tags IDs:", tags_selected.keys() )
 
                 for aoi in self.aois:
-                    aoi.update(tags_selected, point, draw=True, frame=frame)
-
-                # left = self.left_aoi.update(tags_selected, point, draw=True, frame=frame)
-                # right = self.right_aoi.update(tags_selected, point, draw=True, frame=frame)
-                # if left:
-                #     aoi_name = 'left'
-                # elif right:
-                #     aoi_name = 'right'
-                # else:
-                #     aoi_name = 'white-space'
-                #     self.white_space_aoi.gaze_sum += 1
-                
-                
+                    # Select AprilTags
+                    try:
+                        tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in aoi.tag_ids}
+                        aoi.update(tags_selected, point, draw=True, frame=frame)
+                    except:
+                        print("Błąd przy update")
+                        exit()
+                    
 
             except Exception as e:
                 # logging.error(f"Error processing frame {num_frame}: {e}")
