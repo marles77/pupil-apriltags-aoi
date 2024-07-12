@@ -19,6 +19,7 @@ from typing import List, Optional, Any, Dict, Tuple, Union
 #from pydantic import BaseModel
 from dataclasses import dataclass, field
 from datetime import datetime
+import progressbar
 
 
 class SingletonMeta(type):
@@ -39,44 +40,15 @@ class Cols:
     CYELLOW = '\33[33m'
     CEND = '\033[0m'
 
-# class Constants:
-#     # april tags
-#     TAGS = {
-#             'FAMILY': "tag36h11",
-#             'IDS': (20, 17, 22, 19, 23, 18),
-#             'CORNERS': {20: 0, 17: 3, 22: 0.5, 19: 1.5, 23: 1, 18: 0},
-#             }
-#     Y_CORRECT = 0.25
-
-#     COORD = {
-#             0.5: (0, 1),
-#             1.5: (0, 3)
-#             }
-
-#     # paths to video files and gaze data files
-#     PATH_VID = "video/"
-#     FILE = "world.mp4"
-#     VID = PATH_VID + FILE # 0 for webcam
-#     PATH_GAZE = "gaze/"
-#     FILE_GAZE = "gaze_positions.csv"
-#     GAZE = PATH_GAZE + FILE_GAZE
-#     TABLE_GAZE = "gaze_table"
-#     FRAME_START = 0
-#     FRAME_STOP = None
-
 
 @dataclass
 class AppSettings:
-    # setting1: str = field(default="default_value1")
-    # setting2: int = field(default=42)
-    # setting3: bool = field(default=True)
-    # tags
-    TAGS: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
-    # X_CORRECT: float = field(default=0)
-    # Y_CORRECT: float = field(default=0.25)
-    # COORD: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
-    ALPHA: float = field(default=0.5)
+    """
+    The AppSettings class.
+    """
 
+    TAGS: defaultdict[dict] = field(default_factory=lambda: defaultdict(dict))
+    ALPHA: float = field(default=0.5)
     AOIS: List[Dict] = field(default_factory=list)
 
     # paths to video files and gaze data files
@@ -91,11 +63,11 @@ class AppSettings:
     FRAME_STOP: Optional[int|None] = field(default=None)
 
 
-
 class Settings(AppSettings, metaclass=SingletonMeta):
     """
     The AppSettings class with Singleton behavior.
     """
+
     @classmethod
     def load_from_yaml(cls, yaml_file: str):
         # Ensure instance is created before attempting to load from YAML
@@ -116,6 +88,7 @@ class Settings(AppSettings, metaclass=SingletonMeta):
         '''
         Update video and gaze file paths
         '''
+
         if self.PATH_VID == 0:
             self.VID = 0
         else:   
@@ -147,6 +120,7 @@ class Aoi:
     '''
     Area of interest class
     '''
+
     settings: AppSettings
     name: str
     tag_upleft: Optional[Dict[int, Tuple[float, float]]|None] = None
@@ -158,7 +132,6 @@ class Aoi:
     color_bgr: Optional[Tuple[int, int, int]|None] = None
 
     tag_ids: Optional[List[int]|None] = None
-    #pts: Optional[List[List[float]]]
     vertices = Optional[List[List[float|int]]|None]
     gaze_sum: int = 0
 
@@ -167,29 +140,22 @@ class Aoi:
         '''
         Update AOI with new tag detections
         '''
+
         if (len( tags_to_aoi := {tag.tag_id: tag for _, tag in tags_selected.items() if tag.tag_id in self.tag_ids} ) in (3, 4)):
             #print(f"AOI: {self.name}; tags: {tags_to_aoi.keys()}")
             pts = self._establish_pts(tags=tags_to_aoi, ids=self.tag_ids)
-            # if [None, None] in pts:
-            #     pts.append(self._find_fourth_vertex(pts))
-            #     pts.remove([None, None])
-        
+            
             pts_sorted = self._sort_vertices(pts)
-            #print(f"Vertices 1: {pts_sorted}")
             self.vertices = self._establish_vertices(pts_sorted)
 
             if draw and frame is not None:
-                #print(f"Vertices 2: {self.vertices}")
-                #sys.exit()
                 self._draw_aoi(frame=frame)
             
             if Gaze.is_point_in_quadrilateral(point[0], point[1], self.vertices):
                 self.gaze_sum += 1
-                #print(f"{CRED}Left AOI{CEND}")
                 return 1
             else:
                 return 0
-                #print(f"{CYELLOW}No AOI{CEND}")
         return 0
 
 
@@ -201,6 +167,7 @@ class Aoi:
         returns:
             pt: [list] fourth vertex of the quadrilateral
         '''
+
         pt =[None, None]
         try: 
             (x1, y1), (x2, y2), (x3, y3), (x4, y4) = pts
@@ -221,16 +188,16 @@ class Aoi:
                 raise Exception("Error finding fourth vertex")
         except Exception as e:
             logging.error(f"Error finding fourth vertex: {e}")
-            # print(f"Error finding fourth vertex: {e}")
-            # exit()
         return pt
     
+
     def _sort_vertices(self, vertices: List[List[float]]) -> List[List[float]]:
         '''
         Sorts vertices based on the angle with the centroid
         parameters:
-        vertices: list of vertices of the quadrilateral (aoi)
+            vertices: list of vertices of the quadrilateral (aoi)
         '''
+
         try:
             # Calculate the centroid of the polygon
             centroid = tuple(map(lambda x: sum(x) / len(vertices), zip(*vertices)))
@@ -239,94 +206,75 @@ class Aoi:
         except Exception as e:
             logging.error(f"Error sorting vertices: {e}")
             return vertices
-            # print(f"Error sorting vertices: {e}")
-            # exit()
         return vertices
     
-    # TODO: zmienic uwzględniając nowe ustawienia
+    
     def _establish_pts(self, tags: Dict, ids: Tuple) -> List[List[float]]:
         '''
-        Establishes the vertices of the quadrilateral (aoi)
+        Establishes the vertices of the quadrilateral (defined by the apriltags)
         parameters:
-        tags: dictionary of apriltag ids and their corresponding apriltag objects
+            tags: dictionary of apriltag ids and their corresponding apriltag objects
+            ids: tuple of apriltag ids
         '''
+
         pts = []
         ids_sorted = [tags.get(id, None) for id in ids]
         aoi_tags = (self.tag_upleft, self.tag_upright, self.tag_botright, self.tag_botleft)
-        #print(f"AOI tags: {aoi_tags}")
-        #print(f"corner: {tags[ids_sorted[0]['tag_id']].corners[0][0]}")
 
         try:   
             for i, current_tag in enumerate(ids_sorted, start=1):
                 pt = [None, None]
                 if current_tag is None:
                     pt = [None, None]
-                    print("jest None")
+                    
                 else:
                     try:
                         tag_width = np.abs(current_tag.corners[0][0] - current_tag.corners[2][0])
-                        #print(f"Width {i}: {tag_width}")
+                        
                     except Exception as e:
                         logging.error(f"Error getting width: {e}, corner: {type(id.corners)}")
+                    
                     try:
                         tag_height = abs(current_tag.corners[0][1] - current_tag.corners[2][1])
-                        #print(f"height {i}: {tag_height}")
+                        
                     except Exception as e:
                         logging.error(f"Error getting height: {e}")
+                    
                     try:
                         center = [current_tag.center[0], current_tag.center[1]]
-                        #print(f"center {i}: {center}")
+                        
                     except Exception as e:
                         logging.error(f"Error getting center: {e}")
-                    #pt = [[int(center[0]), int(center[1])] for tag in aoi_tags if id==tag[id]][0]
-                    #pt = [0]
+                    
                     try:
                         pt = [[int(center[0] + (tag_width/2)*tag['xy'][0]), int(center[1] + (tag_height/2)*tag['xy'][1])] 
                               for tag in aoi_tags if current_tag.tag_id==tag['id']][0]
-                        #print(f"Punkt {i}: {pt}")
                         
                     except Exception as e:
                         logging.error(f"Error getting point: {e}")
-                    #pt = [[int(center[0]), int(center[1])] for tag in aoi_tags if id==tag[id]][0]
-                    #pt = [0]
+                    
 
                 pts.append(pt)
             
             if [None, None] in pts:
                 pts.append(self._find_fourth_vertex(pts))
                 pts.remove([None, None])
-               
-            # width_upper = pts[0][0] - pts[1][0] if (pts[0][0] is not None) and (pts[1][0] is not None) else 0
-            # width_lower = pts[2][0] - pts[3][0] if (pts[2][0] is not None) and (pts[3][0] is not None) else 0
-            # height_left = pts[0][1] - pts[3][1] if (pts[0][1] is not None) and (pts[3][1] is not None) else 0
-            # height_right = pts[1][1] - pts[2][1] if (pts[1][1] is not None) and (pts[2][1] is not None) else 0
-
-            # TODO: dokonczyc UWAGA: lepiej ustalić wszystkie wierzchołki na tagach a potem liczyć wymiary aoi
-            # pts[0] = pts[0] if pts[0][0] is not None else [None, None]
-            # width_upper = abs(pts[0][0] - pts[1][0])
-            # width_lower = abs(pts[2][0] - pts[3][0])
-            # height_upper = abs(pts[0][1] - pts[3][1])
-            # height_lower = abs(pts[1][1] - pts[2][1])
-            
-            
-
+                  
         except Exception as e:
             logging.error(f"Error establishing pts: {e}")
-            
-            #return pts
-            # print(f"Error establishing pts: {e}")
-            # exit()
-        #print(f"Vertices 1: {pts}")
+            return pts
         return pts
     
 
     def _establish_vertices(self, pts: List[List[float]]) -> List[Tuple[float, float]]:
+        '''
+        Establishes the vertices of the quadrilateral (AOI)
+        '''
+
         width_upper = abs(pts[0][0] - pts[1][0])
         width_lower = abs(pts[2][0] - pts[3][0])
         height_left = abs(pts[0][1] - pts[3][1])
         height_right = abs(pts[1][1] - pts[2][1])
-
-        #print(f"Width upper: {width_upper}, lower: {width_lower}, height left: {height_left}, height right: {height_right}")
 
         res_pts = [None, None, None, None]
 
@@ -334,34 +282,31 @@ class Aoi:
         res_pts[1] = [int(pts[1][0] - width_upper * (1-self.horiz[1])), int(pts[1][1] + height_left * (self.vert[0]))]
         res_pts[2] = [int(pts[2][0] - width_lower * (1-self.horiz[1])), int(pts[2][1] - height_right * (1-self.vert[1]))]
         res_pts[3] = [int(pts[3][0] + width_lower * self.horiz[0]), int(pts[3][1] - height_right * (1-self.vert[1]))]
-        #print(f"Established Vertices: {res_pts}")
+        
         return res_pts
     
 
     def _transform_vertices_to_opencv(self, vertices: List[Tuple[float, float]], frame_width: int, frame_height: int) -> List[Tuple[int, int]]:
         """
         Transform the vertices of the quadrilateral to the OpenCV coordinate system.
-
-        :param vertices: List of tuples [(x1, y1), (x2, y2), (x3, y3), (x4, y4)] in the original coordinate system
-        :param frame_width: Width of the OpenCV frame
-        :param frame_height: Height of the OpenCV frame
-        :return: List of tuples in the OpenCV coordinate system
+        parameters:
+            vertices: List of tuples [(x1, y1), (x2, y2), (x3, y3), (x4, y4)] in the original coordinate system
+            frame_width: Width of the OpenCV frame
+            frame_height: Height of the OpenCV frame
+        returns: 
+            List of tuples in the OpenCV coordinate system
         """
         return [Gaze.transform_point_to_opencv(vertex, frame_width, frame_height) for vertex in vertices]
     
-    def _draw_aoi(self, frame):
+
+    def _draw_aoi(self, frame) -> None:
         '''
         Draws the quadrilateral (aoi)
         parameters:
-        frame: image frame
-        tags: dictionary of apriltag ids and their corresponding apriltag objects
+            frame: image frame
         '''
         
         pts = self.vertices
-
-        # for i, p in enumerate(pts, start=1):
-        #     cv2.putText(frame, str(i), (p[0] + 10, p[1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        #     #cv2.circle(frame, (p[0], p[1]), 5, (0, 0, 255), -1)
 
         try:
             pts_poly = np.array(pts, np.int32).reshape((-1, 1, 2))
@@ -377,16 +322,17 @@ class Aoi:
             return None
 
 
-
 @dataclass
 class Gaze():
     '''
-    Class to store gaze data
+    Class to store and process gaze data
     '''
+
     path: str
     data: np.ndarray = None
     compr_data: np.ndarray = None # Compressed gaze data - to match world camera frames
     data_table: pd.DataFrame = None # Pandas table to store the gaze data and aoi data
+    aois_names: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         try:
@@ -398,50 +344,61 @@ class Gaze():
             self.compr_data = self.data[unique_pos]
             # Pandas table
             self.data_table = pd.read_csv(self.path, sep=",")
-            self.data_table['aoi-left'] = [None] * self.data_table.shape[0]
-            self.data_table['aoi-right'] = [None] * self.data_table.shape[0]
+            # Prepare new columns for the aoi data
+            for name in self.aois_names:
+                self.data_table[f"{name}"] = [None] * self.data_table.shape[0]
+            
             self.data_table['aoi-gaze'] = [''] * self.data_table.shape[0]
-            ###
-            print(f"{Cols.CYELLOW}Compressed Rows: {self.compr_data.shape[0]} | 1st: {self.compr_data[0, 1]} | Last: {self.compr_data[-1, 1]} | df: {self.data_table.shape}{Cols.CEND}")
-            print(self.data_table.head())
-            print(self.data_table.info())
-            ###
+            
+            print(f"{Cols.CYELLOW}Compressed Rows: {self.compr_data.shape[0]} | 1st: {self.compr_data[0, 1]} | Last: {self.compr_data[-1, 1]} | DataFrame: {self.data_table.shape}{Cols.CEND}")
+            
         except Exception as e:
-            #logging.error(f"Error reading gaze data: {e}")
+            logging.error(f"Error reading gaze data: {e}")
             print(f"Error reading gaze data: {e}")
-            exit()
+            sys.exit()
         finally:
             print(f"{Cols.CGREEN}Gaze data loaded | Rows: {self.data.shape[0]}{Cols.CEND}")
+            
     
-    # TODO: Update the table with the aoi data
     def update_table(self, frame: int, to_update: Dict) -> None:
-        self.gaze.data_table.loc[self.gaze.data_table['world_index']==frame, list(to_update.keys())] = to_update.values()
+        '''
+        Update the table with the aoi data
+        '''
+
+        try:
+            self.data_table.loc[self.data_table['world_index']==frame, list(to_update.keys())] = to_update.values()
+        except Exception as e:
+            logging.error(f"Error updating table: {e}")
 
 
     @staticmethod
     def transform_point_to_opencv(point: Tuple[float, float], frame_width: int, frame_height: int) -> Tuple[int, int]:
         """
         Transform a point from the original coordinate system to the OpenCV coordinate system.
-
-        :param point: Tuple (x, y) in the original coordinate system (0,0 to 1,1)
-        :param frame_width: Width of the OpenCV frame
-        :param frame_height: Height of the OpenCV frame
-        :return: Tuple (new_x, new_y) in the OpenCV coordinate system
+        parameters: 
+            point: Tuple (x, y) in the original coordinate system (0,0 to 1,1)
+            frame_width: Width of the OpenCV frame
+            frame_height: Height of the OpenCV frame
+        returns: 
+            Tuple (new_x, new_y) in the OpenCV coordinate system
         """
+
         point_x, point_y = point
         new_x = int(point_x * frame_width)
         new_y = int((1 - point_y) * frame_height)
         return new_x, new_y
     
+
     @staticmethod
     def is_point_in_quadrilateral(px: int, py: int, vertices: List[Tuple[int, int]]) -> bool:
         """
         Determine if the point (px, py) is inside the quadrilateral defined by vertices.
-
-        :param px: x coordinate of the point
-        :param py: y coordinate of the point
-        :param vertices: List of tuples [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
-        :return: True if the point is inside the quadrilateral, False otherwise
+        parameters: 
+            px: x coordinate of the point
+            py: y coordinate of the point
+            vertices: List of tuples [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
+        returns: 
+            True if the point is inside the quadrilateral, False otherwise
         """
 
         try:
@@ -464,8 +421,6 @@ class Gaze():
             return inside
         except Exception as e:
             logging.error(f"Error determining if point is inside quadrilateral: {e}")
-            # print(f"Error determining if point is inside quadrilateral: {e}; frame: {num_frame}")
-            # exit()
             return False
 
 class Runner:
@@ -479,10 +434,9 @@ class Runner:
 
         self.vid = settings.VID 
         self.tag_ids = settings.TAGS['IDS']
-        self.aois = []#settings.AOIS
-        self.gaze = Gaze(path=settings.GAZE)
-        # self.left_aoi = Aoi(name="left", settings=settings, tag_ids=self.tag_ids[:4])
-        # self.right_aoi = Aoi(name="right", settings=settings, tag_ids=self.tag_ids[2:6])
+        self.aois = []
+        
+        # Create the AOI objects
         for aoi in settings.AOIS:
             aoi_tag_ids = [val['id'] for key, val in aoi.items() if key in ('tag_upleft', 'tag_upright', 'tag_botleft', 'tag_botright')]
             self.aois.append(Aoi(name=aoi['name'], 
@@ -497,16 +451,20 @@ class Runner:
                                  tag_ids=aoi_tag_ids))
             
         self.white_space_aoi = Aoi(name="white-space", settings=settings)
-        
+        self.gaze = Gaze(path=settings.GAZE, aois_names=[aoi.name for aoi in self.aois])
+
 
     def run_analysis(self) -> None:
         '''
-        Main function to run apriltag detection
-        parameters:
-        vid: video file path; if 0, webcam will be used
+        Main function to run analysis of gaze data in reference to the AOIs
         '''
+
         print("I am running the analysis")
-        #exit()
+
+        if self.vid == 0:
+            print(f"{Cols.CRED}Error: Webcam not supported in the analysis mode.{Cols.CEND}")
+            sys.exit()
+
         cap = cv2.VideoCapture(self.vid)
 
         if not cap.isOpened():
@@ -516,13 +474,18 @@ class Runner:
             frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} {Cols.CEND}")
 
-            frame_start = self.settings.FRAME_START 
-            frame_stop = self.settings.FRAME_STOP if (self.settings.FRAME_STOP and (self.settings.FRAME_STOP <= length)) else length
+            start_frame = self.settings.FRAME_START 
+            stop_frame = self.settings.FRAME_STOP if (self.settings.FRAME_STOP and (self.settings.FRAME_STOP <= length)) else length
+
+            total_frames = stop_frame - start_frame
+            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | Frames to analyze: {total_frames}{Cols.CEND}")
+
+            bar = progressbar.ProgressBar(max_value=total_frames)
 
             # Process the video frame by frame
-            for i in range(frame_start, frame_stop):
+            for i in range(start_frame, stop_frame):
+                bar.update(i-start_frame)
                 aoi_name = ''
                 ret, frame = cap.read()
                 if not ret:
@@ -536,71 +499,65 @@ class Runner:
                 try:
                     gaze_point = tuple(self.gaze.compr_data[i, [3, 4]])
                     point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
-                    left, right = 0, 0
+                    
                     # Select AprilTags
                     tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids}
-                    #print("Tags IDs:", tags_selected.keys() )
-                    left = self.left_aoi.update(tags_selected, point)
-                    right = self.right_aoi.update(tags_selected, point)
-                    if left:
-                        aoi_name = 'left'
-                    elif right:
-                        aoi_name = 'right'
-                    else:
-                        aoi_name = 'white-space'
-                        self.white_space_aoi.gaze_sum += 1
-                    #white_space_aoi.gaze_sum = white_space_aoi.gaze_sum + 1 if not(left or right) else white_space_aoi.gaze_sum
 
+                    for aoi in self.aois:
+                        res = aoi.update(tags_selected, point)
+                        aoi_name = aoi_name + aoi.name + ' ' if res else aoi_name
+
+                    aoi_name = aoi_name if aoi_name else 'white-space'
+
+                    to_update = {aoi.name: str(aoi.vertices) for aoi in self.aois}
+                    to_update['aoi-gaze'] = aoi_name
                     
-                    to_update = {'aoi-left': str(self.left_aoi.vertices), 
-                                'aoi-right': str(self.right_aoi.vertices), 
-                                'aoi-gaze': aoi_name}
-                    # print(i, to_update)
-                    self.gaze.update_table(i, to_update)
-                    #self.gaze.data_table.loc[self.gaze.data_table['world_index']==i, list(to_update.keys())] = to_update.values()
-                    
+                    self.gaze.update_table(i, to_update)  
 
                 except Exception as e:
                     logging.error(f"Error processing frame {i}: {e}")
-                    # print(f"Error processing frame {i}: {e}")
-                    # exit()
-
-
+                    
         cap.release()
         cv2.destroyAllWindows()
-        print(f"Left AOI: {self.left_aoi.gaze_sum} | Right AOI: {self.right_aoi.gaze_sum} | White space: {self.white_space_aoi.gaze_sum}")
+        
+        # Save the data to table
         self.gaze.data_table.to_csv(f"{self.settings.PATH_GAZE}{self.settings.TABLE_GAZE}_{datetime_str}.csv", index=False)
 
     
-    
     def run_view_aoi(self) -> None:
         '''
-        View the detected AOIs in the video
+        View the detected AOIs in the video along with the gaze data
         '''
-        print("I am running AOI detection")
 
-        num_gaze_left = 0
-        num_gaze_right = 0
-        
-        # if self.vid:
+        print("I am running AOI detection")
 
         cap = cv2.VideoCapture(self.vid)
 
         if not cap.isOpened():
             print(f"{Cols.CRED}Error: Could not open video.{Cols.CEND}")
-            exit()
+            sys.exit()
         else:
             frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.vid else 0
+            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | START STREAMING - Press Q to exit{Cols.CEND}")
+            if length <= self.settings.FRAME_START:
+                print(f"{Cols.CRED}Error: Video is too short. Check your settings file (FRAME_START is set at {self.settings.FRAME_START}).{Cols.CEND}")
+                sys.exit()
 
-        num_frame = 0
+        start_frame = self.settings.FRAME_START if self.vid != 0 else 0 # start from 0 if webcam is used
+        stop_frame = self.settings.FRAME_STOP if self.settings.FRAME_STOP != None else length
+        num_frame = start_frame
+
+        total_frames = stop_frame - start_frame
+        bar = progressbar.ProgressBar(max_value=total_frames)
+        
+        # set the video position to the start frame
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        i = 0
 
         while cap.isOpened():
-            # if self.vid:
-            
-
+            bar.update(i)
             ret, frame = cap.read()
             if not ret:
                 break
@@ -611,71 +568,37 @@ class Runner:
             # Detect AprilTags in the grayscale image
             tags = self.detector.detect(gray)
 
-            # Draw bounding boxes around detected AprilTags
-            tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids} if self.vid else {tag.tag_id: tag for tag in tags}
-
-            # if len(tags_0_3) == 4:
-            #     pprint(tags_0_3.keys())
-            #     break
-
-        
-            for _, tag in tags_selected.items():
-                if self.vid:
-                    corner = self.settings.TAGS['CORNERS'][tag.tag_id]
-                    if corner in (0, 1, 2, 3):
-                        pt = tuple(tag.corners[self.settings.TAGS['CORNERS'][tag.tag_id]].astype(int))
-                    else:
-                        pt = (tag.center[0].astype(int), tag.corners[self.settings.COORD[corner][0]][1].astype(int))
-                    
-                    cv2.circle(frame, pt, 5, (255, 255, 0), -1)
-
-                    for idx in range(len(tag.corners)):
-                        
-                        pt1 = tuple(tag.corners[idx].astype(int))
-                        pt2 = tuple(tag.corners[(idx + 1) % len(tag.corners)].astype(int))
-                        cv2.line(frame, pt1, pt2, (0, 255, 0), 2)
-
-                # Optionally, draw the tag ID
-                tag_id = str(tag.tag_id)
-                cv2.putText(frame, tag_id, (tag.center[0].astype(int), tag.center[1].astype(int)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                
-            # *****
             try:
                 gaze_point = tuple(self.gaze.compr_data[num_frame, [3, 4]])
                 point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
-                left, right = 0, 0
-                # Select AprilTags
-                tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in self.tag_ids}
-                #print("Tags IDs:", tags_selected.keys() )
-                left = self.left_aoi.update(tags_selected, point, draw=True, frame=frame)
-                right = self.right_aoi.update(tags_selected, point, draw=True, frame=frame)
-                if left:
-                    aoi_name = 'left'
-                elif right:
-                    aoi_name = 'right'
-                else:
-                    aoi_name = 'white-space'
-                    self.white_space_aoi.gaze_sum += 1
-                
-                
+                #left, right = 0, 0
 
+                for aoi in self.aois:
+                    # Select AprilTags
+                    try:
+                        tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in aoi.tag_ids}
+                        aoi.update(tags_selected, point, draw=True, frame=frame)
+                    except:
+                        print("Błąd przy update")
+                        exit()
+                
             except Exception as e:
-                # logging.error(f"Error processing frame {num_frame}: {e}")
+                logging.error(f"Error processing frame {num_frame}: {e}")
                 # print(f"Error processing frame {frame}: {e}")
-                exc_type, exc_obj, exc_tb = sys.exc_info()
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
-                exit()
+                # exc_type, exc_obj, exc_tb = sys.exc_info()
+                # fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                # print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
+                # sys.exit()
             
-
-            # *****
             if self.vid:
                 overlay = frame.copy()
                 cv2.circle(overlay, point, 15, (0, 0, 255), -1)
 
             blended_image = cv2.addWeighted(overlay, self.settings.ALPHA, frame, 1-self.settings.ALPHA, 0) if self.vid else frame
-            # Display the frame with detected tags
+            # Display frame number
+            cv2.rectangle(blended_image, (10, 5), (80, 28), (0, 0, 0), -1)
+            cv2.putText(blended_image, str(num_frame), (15, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            # Display the frame
             cv2.imshow('Pupil Labs AprilTag Detection', blended_image)
 
 
@@ -684,21 +607,25 @@ class Runner:
                 break
             
             num_frame += 1
-            # if num_frame >= 10:
-            #     break
+            i += 1
+            if num_frame >= stop_frame:
+                break
+        
         # Release resources
-        print(f"Frames read: {num_frame}")
-        print(f"{Cols.CGREEN}Left: {num_gaze_left} | Right: {num_gaze_right}{Cols.CEND}")
+        print(f"\nFrames read: {num_frame}")
+        print("AOI gaze distribution:")
+
+        for aoi in self.aois:
+            print(f"AOI {aoi.name}: {aoi.gaze_sum}")
         cap.release()
         cv2.destroyAllWindows()
-
-
 
 
     def run_view_tags(self) -> None:
         '''
         View the detected tags in the video
         '''
+
         print("I am running tags detection")
 
         cap = cv2.VideoCapture(self.vid)
@@ -710,24 +637,23 @@ class Runner:
             frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} {Cols.CEND}")
+            print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | START STREAMING - Press Q to exit{Cols.CEND}")
             if length <= self.settings.FRAME_START:
                 print(f"{Cols.CRED}Error: Video is too short. Check your settings file (FRAME_START is set at {self.settings.FRAME_START}).{Cols.CEND}")
                 exit()
 
-        start_frame = self.settings.FRAME_START
+        start_frame = self.settings.FRAME_START if self.vid != 0 else 0 # start from 0 if webcam is used
         stop_frame = self.settings.FRAME_STOP if self.settings.FRAME_STOP != None else length
         num_frame = start_frame
         
+        # set the video position to the start frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         while cap.isOpened():
-            
             ret, frame = cap.read()
             if not ret:
                 break
 
-            
             # Convert the frame to grayscale as the detector requires a single channel image
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -737,11 +663,11 @@ class Runner:
             # Draw bounding boxes around detected AprilTags
             tags_selected = {tag.tag_id: tag for tag in tags}
 
-            
+            # loop over the detected tags and put labels
             for _, tag in tags_selected.items():
                 if num_frame == 0:
                     print(f"Tag identified: {tag.tag_id}")
-                #pprint(tag, sort_dicts=False)
+                
                 for idx in range(len(tag.corners)):
                     
                     pt1 = tuple(tag.corners[idx].astype(int))
@@ -753,9 +679,12 @@ class Runner:
                               (tag.center[0].astype(int) + 15, tag.center[1].astype(int) + 15), (50, 50, 50), -1)
                 cv2.putText(frame, tag_id, (tag.center[0].astype(int)-10, tag.center[1].astype(int)+5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+            # Display frame number
+            cv2.rectangle(frame, (10, 5), (80, 28), (0, 0, 0), -1)
+            cv2.putText(frame, str(num_frame), (15, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
             cv2.imshow('Pupil Labs AprilTag Detection', frame)
-
 
             # Press 'q' to exit the video display loop
             if cv2.waitKey(5) & 0xFF == ord('q'):
@@ -764,6 +693,7 @@ class Runner:
             num_frame += 1
             if num_frame >= stop_frame:
                 break
+        
         # Release resources
         print(f"Frames read: {num_frame - start_frame}")
         cap.release()
@@ -774,30 +704,34 @@ class Runner:
         '''
         Test AOIS
         '''
+
         print("I am running AOIS test")
         
         for aoi in self.aois:
             pprint(aoi.__dict__, sort_dicts=False)
 
-        #sys.exit()
-
         cap = cv2.VideoCapture(self.vid)
 
         if not cap.isOpened():
             print(f"{Cols.CRED}Error: Could not open video.{Cols.CEND}")
-            exit()
+            sys.exit()
         else:
             frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.vid else 0
+            length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             print(f"{Cols.CGREEN}Image size: {frame_width}:{frame_height} | Frames: {length} | START STREAMING - Press Q to exit{Cols.CEND}")
+            if length <= self.settings.FRAME_START:
+                print(f"{Cols.CRED}Error: Video is too short. Check your settings file (FRAME_START is set at {self.settings.FRAME_START}).{Cols.CEND}")
+                sys.exit()
 
-        num_frame = 0
+        start_frame = self.settings.FRAME_START if self.vid != 0 else 0 # start from 0 if webcam is used
+        stop_frame = self.settings.FRAME_STOP if self.settings.FRAME_STOP != None else length
+        num_frame = start_frame
+        
+        # set the video position to the start frame
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
         while cap.isOpened():
-            # if self.vid:
-            
-
             ret, frame = cap.read()
             if not ret:
                 break
@@ -809,59 +743,53 @@ class Runner:
             tags = self.detector.detect(gray)
 
             try:
-                
                 gaze_point = tuple(self.gaze.compr_data[num_frame, [3, 4]])
                 point = Gaze.transform_point_to_opencv(gaze_point, frame_width, frame_height)
-                #left, right = 0, 0
-                
-                
-                #print("Tags IDs:", tags_selected.keys() )
 
                 for aoi in self.aois:
                     # Select AprilTags
-                    try:
-                        tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in aoi.tag_ids}
-                        aoi.update(tags_selected, point, draw=True, frame=frame)
-                    except:
-                        print("Błąd przy update")
-                        exit()
+                    tags_selected = {tag.tag_id: tag for tag in tags if tag.tag_id in aoi.tag_ids}
+                    aoi.update(tags_selected, point, draw=True, frame=frame)
                     
-
+                    
             except Exception as e:
-                # logging.error(f"Error processing frame {num_frame}: {e}")
+                logging.error(f"Error processing frame {num_frame}: {e}")
                 # print(f"Error processing frame {frame}: {e}")
-                exc_type, exc_obj, exc_tb = sys.exc_info()
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-                print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
-                exit()
+                # exc_type, exc_obj, exc_tb = sys.exc_info()
+                # fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                # print(f"Error processing frame {frame}: {e}, {exc_type}, {fname}, {exc_tb.tb_lineno}")
+                # sys.exit()
             
-
-            # *****
             if self.vid:
                 overlay = frame.copy()
                 cv2.circle(overlay, point, 15, (0, 0, 255), -1)
 
             blended_image = cv2.addWeighted(overlay, self.settings.ALPHA, frame, 1-self.settings.ALPHA, 0) if self.vid else frame
-            # Display the frame with detected tags
+            # Display frame number
+            cv2.rectangle(blended_image, (10, 5), (80, 28), (0, 0, 0), -1)
+            cv2.putText(blended_image, str(num_frame), (15, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            # Display the frame
             cv2.imshow('Pupil Labs AOI Test', blended_image)
-
-            #cv2.imshow('Pupil Labs AOI Test', frame)
 
             # Press 'q' to exit the video display loop
             if cv2.waitKey(5) & 0xFF == ord('q'):
                 break
             
             num_frame += 1
-            # if num_frame >= 10:
-            #     break
+            if num_frame >= stop_frame:
+                break
+        
         # Release resources
         print(f"Frames read: {num_frame}")
         cap.release()
         cv2.destroyAllWindows()
 
 
+def main(argv) -> None:
+    '''
+    Main function
+    '''
 
-def main(argv):
     if argv:
         print(argv)
         
@@ -882,9 +810,7 @@ def main(argv):
                 debug=0
             )
             runner = Runner(settings, detector=detector)
-            #pprint(settings.__dict__)
-            # pprint(runner.aois)
-            # sys.exit()
+            
             if argv[2] == '--run':
                 if argv[3] == '0':
                     runner.run_analysis()

@@ -20,7 +20,7 @@ ALPHA: 0.5
 
 # AOIs; xy - 0 means center, 1 means edge; horiz/vert - 0 means left/top, 1 means right/bottom
 AOIS:
-  - name: left
+  - name: leftish
     tag_upleft:
       id: 20
       xy: [0, 0]
@@ -36,7 +36,7 @@ AOIS:
     horiz: [-0.05, 1]
     vert: [0.1, 0.9]
     color_bgr: [0, 255, 0]
-  - name: right
+  - name: rightish
     tag_upleft:
       id: 22
       xy: [0, 0]
@@ -60,4 +60,4 @@ PATH_GAZE: gaze/
 FILE_GAZE: gaze_positions.csv
 TABLE_GAZE: gaze_table
 FRAME_START: 0
-FRAME_STOP: 100 #null
+FRAME_STOP: null
