@@ -1,6 +1,6 @@
 # ======================================================================= #
-# analyze gaze data from Pupil Core eye tracker using apriltag detection  #
-#                                                                         #
+# Analyze gaze data from Pupil Core eye tracker using apriltag detection  #
+# Author: Marcin Lesniak, Ph.D.                                           #
 # use: python april_offline.py --set settings-6.yml --run [0, 1, 2, 3]    #
 #      0: run analysis; 1: run aoi view; 2: run tags view; 3: run test    #
 # ========================================================================#
@@ -16,7 +16,6 @@ import pandas as pd
 from pprint import pprint
 import logging
 from typing import List, Optional, Any, Dict, Tuple, Union
-#from pydantic import BaseModel
 from dataclasses import dataclass, field
 from datetime import datetime
 import progressbar
@@ -69,7 +68,7 @@ class Settings(AppSettings, metaclass=SingletonMeta):
     """
 
     @classmethod
-    def load_from_yaml(cls, yaml_file: str):
+    def load_from_yaml(cls, yaml_file: str) -> None:
         # Ensure instance is created before attempting to load from YAML
         if cls not in SingletonMeta._instances:
             SingletonMeta._instances[cls] = cls()
@@ -84,7 +83,7 @@ class Settings(AppSettings, metaclass=SingletonMeta):
                 setattr(instance, key, value)
     
 
-    def update_dirs(self):
+    def update_dirs(self) -> None:
         '''
         Update video and gaze file paths
         '''
@@ -136,7 +135,7 @@ class Aoi:
     gaze_sum: int = 0
 
 
-    def update(self, tags_selected: Dict, point: Tuple[int, int], draw: bool=False, frame: Optional[np.ndarray|None]=None) -> None:
+    def update(self, tags_selected: Dict, point: Tuple[int, int], draw: bool=False, frame: Optional[np.ndarray|None]=None) -> int:
         '''
         Update AOI with new tag detections
         '''
@@ -266,22 +265,64 @@ class Aoi:
         return pts
     
 
+    def _find_split_point(self, a: Tuple[float, float], b: Tuple[float, float], proportion: float) -> Tuple[float, float]:
+        '''
+        Finds the split point between two points
+        '''
+
+        x1, y1 = a
+        x2, y2 = b
+        
+        c_x = x1 + proportion * (x2 - x1)
+        c_y = y1 + proportion * (y2 - y1)
+        
+        return (c_x, c_y)
+
+
     def _establish_vertices(self, pts: List[List[float]]) -> List[Tuple[float, float]]:
         '''
         Establishes the vertices of the quadrilateral (AOI)
+        parameters:
+            pts: list of vertices of the quadrilateral (based on apriltags))
+        returns:
+            vertices: list of vertices of AOI
         '''
+        
+        # Vertices are arranged in clockwise order: 
+        # a  b 
+        # d  c
+        a = self._find_split_point(pts[0], pts[1], self.horiz[0])
+        ax = a[0]
+        d = self._find_split_point(pts[3], pts[2], self.horiz[0])
+        dx = d[0]
+        ay = self._find_split_point(a, d, self.vert[0])[1]
+        dy = self._find_split_point(a, d, self.vert[1])[1]
 
-        width_upper = abs(pts[0][0] - pts[1][0])
-        width_lower = abs(pts[2][0] - pts[3][0])
-        height_left = abs(pts[0][1] - pts[3][1])
-        height_right = abs(pts[1][1] - pts[2][1])
+        b = self._find_split_point(pts[0], pts[1], self.horiz[1])
+        bx = b[0]
+        c = self._find_split_point(pts[3], pts[2], self.horiz[1])
+        cx = c[0]
+        by = self._find_split_point(b, c, self.vert[0])[1]
+        cy = self._find_split_point(b, c, self.vert[1])[1]
 
-        res_pts = [None, None, None, None]
+        res_pts = [[ax, ay], [bx, by], [cx, cy], [dx, dy]]
+        res_pts = list(map(lambda z: [int(z[0]), int(z[1])], res_pts))
+        # width_upper = abs(pts[0][0] - pts[1][0])
+        # width_lower = abs(pts[2][0] - pts[3][0])
+        # height_left = abs(pts[0][1] - pts[3][1])
+        # height_right = abs(pts[1][1] - pts[2][1])
 
-        res_pts[0] = [int(pts[0][0] + width_upper * self.horiz[0]), int(pts[0][1] + height_left * self.vert[0])]
-        res_pts[1] = [int(pts[1][0] - width_upper * (1-self.horiz[1])), int(pts[1][1] + height_left * (self.vert[0]))]
-        res_pts[2] = [int(pts[2][0] - width_lower * (1-self.horiz[1])), int(pts[2][1] - height_right * (1-self.vert[1]))]
-        res_pts[3] = [int(pts[3][0] + width_lower * self.horiz[0]), int(pts[3][1] - height_right * (1-self.vert[1]))]
+        # res_pts = [None, None, None, None]
+
+        # res_pts[0] = [int(pts[0][0] + width_upper * self.horiz[0]), int(pts[0][1] + height_left * self.vert[0])]
+        # res_pts[1] = [int(pts[1][0] - width_upper * (1-self.horiz[1])), int(pts[1][1] + height_left * (self.vert[0]))]
+        # res_pts[2] = [int(pts[2][0] - width_lower * (1-self.horiz[1])), int(pts[2][1] - height_right * (1-self.vert[1]))]
+        # res_pts[3] = [int(pts[3][0] + width_lower * self.horiz[0]), int(pts[3][1] - height_right * (1-self.vert[1]))]
+
+        # res_pts[0] = [int(pts[0][0] + width_upper * self.horiz[0]), int(pts[0][1] + height_left * self.vert[0])]
+        # res_pts[1] = [int(pts[1][0] - width_upper * (1-self.horiz[1])), int(pts[1][1] + height_right * (self.vert[0]))]
+        # res_pts[2] = [int(pts[2][0] - width_lower * (1-self.horiz[1])), int(pts[2][1] - height_right * (1-self.vert[1]))]
+        # res_pts[3] = [int(pts[3][0] + width_lower * self.horiz[0]), int(pts[3][1] - height_left * (1-self.vert[1]))]
         
         return res_pts
     
@@ -516,7 +557,8 @@ class Runner:
 
                 except Exception as e:
                     logging.error(f"Error processing frame {i}: {e}")
-                    
+            
+            bar.finish()        
         cap.release()
         cv2.destroyAllWindows()
         
@@ -612,6 +654,7 @@ class Runner:
                 break
         
         # Release resources
+        bar.finish()
         print(f"\nFrames read: {num_frame}")
         print("AOI gaze distribution:")
 
@@ -730,6 +773,7 @@ class Runner:
         
         # set the video position to the start frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        i = 0
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -776,11 +820,12 @@ class Runner:
                 break
             
             num_frame += 1
+            i += 1
             if num_frame >= stop_frame:
                 break
         
         # Release resources
-        print(f"Frames read: {num_frame}")
+        print(f"Frames read: {i}")
         cap.release()
         cv2.destroyAllWindows()
 
@@ -793,13 +838,14 @@ def main(argv) -> None:
     if argv:
         print(argv)
         
-        # manage settings read form a yaml file
+        # Manage settings read form a yaml file
         if argv[0] == '--set':
             file_settings = argv[1]
             Settings.load_from_yaml(file_settings)
             settings = Settings()
             settings.update_dirs()
-            # configure april tag detector
+            
+            # Configure april tag detector
             detector = Detector(
                 families=settings.TAGS['FAMILY'],
                 nthreads=1,

@@ -4,18 +4,6 @@
 TAGS:
     FAMILY: tag36h11
     IDS: [20,17,22,19,23,18]
-    CORNERS: 
-        20: 0
-        17: 3
-        22: 0.5
-        19: 1.5
-        23: 1
-        18: 0
-X_CORRECT: 0
-Y_CORRECT: 0.25
-COORD:
-    0.5: [0,1]
-    1.5: [0,3]
 ALPHA: 0.5
 
 # AOIs; xy - 0 means center, 1 means edge; horiz/vert - 0 means left/top, 1 means right/bottom

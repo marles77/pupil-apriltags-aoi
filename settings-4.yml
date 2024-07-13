@@ -4,18 +4,6 @@
 TAGS:
     FAMILY: tag36h11
     IDS: [0, 1, 2, 3]
-#     CORNERS: 
-#         20: 0
-#         17: 3
-#         22: 0.5
-#         19: 1.5
-#         23: 1
-#         18: 0
-# X_CORRECT: 0
-# Y_CORRECT: 0.25
-# COORD:
-#     0.5: [0,1]
-#     1.5: [0,3]
 ALPHA: 0.5
 
 # AOIs; xy - 0 means center, 1 means edge; horiz/vert - 0 means left/top, 1 means right/bottom
@@ -33,7 +21,7 @@ AOIS:
     tag_botright:
       id: 3
       xy: [0, 0]
-    horiz: [0.05, 0.5]
+    horiz: [0.06, 0.49]
     vert: [-0.08, 1.08]
     color_bgr: [0, 255, 0]
   - name: right
@@ -49,9 +37,25 @@ AOIS:
     tag_botright:
       id: 3
       xy: [0, 0]
-    horiz: [0.5, 0.95]
+    horiz: [0.5, 0.94]
     vert: [-0.08, 1.08]
     color_bgr: [255, 0, 0]
+  - name: person
+    tag_upleft:
+      id: 0
+      xy: [0, 0]
+    tag_upright:
+      id: 1
+      xy: [0, 0]
+    tag_botleft:
+      id: 2
+      xy: [0, 0]
+    tag_botright:
+      id: 3
+      xy: [0, 0]
+    horiz: [0.065, 0.24]
+    vert: [0.1, 1]
+    color_bgr: [100, 0, 100]
 
 # files
 PATH_VID: C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/ #video/ # 0 for webcam
@@ -60,4 +64,4 @@ PATH_GAZE: C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/exp
 FILE_GAZE: gaze_positions.csv
 TABLE_GAZE: gaze_table
 FRAME_START: 5050 #450
-FRAME_STOP: 9400
+FRAME_STOP: 5900 #9400
