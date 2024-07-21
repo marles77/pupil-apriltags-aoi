@@ -42,7 +42,7 @@ AOIS:
     color_bgr: [255, 0, 0]
 
 # files
-PATH_VID: video/ #C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/ #video/ # 0 for webcam
+PATH_VID: video/ # 0 for webcam
 FILE: world.mp4
 PATH_GAZE: gaze/
 FILE_GAZE: gaze_positions.csv

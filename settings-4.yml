@@ -58,10 +58,10 @@ AOIS:
     color_bgr: [100, 0, 100]
 
 # files
-PATH_VID: C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/ #video/ # 0 for webcam
+PATH_VID: video/ # 0 for webcam
 FILE: world.mp4
-PATH_GAZE: C:/Users/User/Desktop/pendrive_28052024/Pupil_data/2024_06_19/024/exports/000/ #gaze/
+PATH_GAZE: gaze/
 FILE_GAZE: gaze_positions.csv
 TABLE_GAZE: gaze_table
-FRAME_START: 5050 #450
-FRAME_STOP: 5900 #9400
+FRAME_START: 0
+FRAME_STOP: null

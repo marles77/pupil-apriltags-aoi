@@ -24,7 +24,6 @@ Available modes:
 - 0: run analysis, to create CSV file with gaze data + AOI data
 - 1: run aoi view, useful to check if AOIs are detected correctly
 - 2: run tags view, useful to check if tags are detected correctly, webcam can be used
-- 3: run test, similar to mode 1, but with more verbosity
 
 Settings are stored in a YML file, see `settings-4.yml` for an example.
 The file includes information about apriltags (family and IDs) which are supposed to be detected, paths and files, the first and final frame of the video to be analyzed, as well as AOIs configuration. Each AOI is defined by:
@@ -34,7 +33,13 @@ In the example below, the green AOI's parameters are `horiz: [0.06, 0.49]` and `
 ![aois](aois.png)
 - color of the frame of the AOI
 
-When using mode 0, the results of the analysis are stored in a Pandas DataFrame and then saved to a CSV file. Each AOI gets its own column which stores its coordinates. The last column contains the name of the AOI in which the gaze point has been detected.
+The script creates four types of objects:
+1. Settings - singleton object to manage app settings
+2. Runner - object to run analysis and visualizations depending on the chosen mode
+3. Gaze - object to manage gaze data
+4. Aoi - objects to manage AOIs
+
+When using mode 0, the results of the analysis are stored in a Pandas DataFrame and then saved to a CSV file. Each AOI gets its own column which stores its coordinates. The 'aoi-gaze' column contains names of AOIs in which the gaze point has been detected (multiple AOIs are separated by a space).
 ![df](df.PNG)
 **Note**, that because visual data are processed, the analysis can take several minutes, depending on the video length and the hardware used.
 
